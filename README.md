@@ -49,5 +49,7 @@ homework runner.
 
 
 ## Homework 1 solution: 
-> to students: please fill your solution description here.
+The chain sends each receipt image to the vision-capable DeepSeek Flash model and asks it to return structured JSON containing the discounted subtotal before rounding, each applied discount as a positive monetary amount, and the final amount paid after rounding. The Python code processes all receipts in the selected folder, parses each response, and aggregates the extracted values using `Decimal` for accurate currency arithmetic.
+
+The total spent is the sum of each receipt's final payment after rounding. The amount without discounts is calculated by adding every receipt's discounts back to its subtotal before rounding; rounding adjustments are excluded. The final responses are formatted as HKD amounts for the two required queries.
 
