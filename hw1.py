@@ -63,7 +63,46 @@ def build_chain() -> Any:
     ``deepseek-v4-flash-vision-exp``. The API key is loaded from .env.
     """
     ### YOUR CODE HERE
-    return None
+    from langchain_core.prompts import ChatPromptTemplate
+    from langchain_deepseek import ChatDeepSeek
+
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            (
+                "system",
+                """Return only valid JSON format as follows:
+    {{
+        "subtotal": 0.00,
+        "discounts": [0.00],
+        "final_payment": 0.00
+    }}""",
+            ),
+            (
+                "human",
+                [
+                    {
+                        "type": "text",
+                        "text": """You are analyzing one supermarket receipt. Return only valid JSON with these fields:
+1. subtotal: the receipt's SUBTOTAL after discounts but before any ROUNDING line.
+2. discounts: a list of positive monetary amounts for each applied discount, promotion, or coupon. For percentage offers, return the actual money amount discounted, not the percentage. Do not include ROUNDING, subtotal, or payment/tender amounts.
+3. final_payment: the amount actually paid after ROUNDING, not the amount tendered or change returned.
+
+Do not count a discount twice if it is repeated only as a summary of already listed applied discounts.""",
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": "{image_url}"},
+                    },
+                ],
+            ),
+        ]
+    )
+
+    model = ChatDeepSeek(
+        model = "deepseek-v4-flash-vision-exp",
+        temperature = 0
+    )
+    return prompt | model
 
 
 def answer_queries(chain: Any, images: list[Path]) -> dict[str, Any]:
@@ -79,8 +118,49 @@ def answer_queries(chain: Any, images: list[Path]) -> dict[str, Any]:
     to process independent receipt-extraction prompts in parallel.
     """
     ### YOUR CODE HERE
-    _ = (chain, images)
-    return {QUERY_1: DUMMY_RESPONSE, QUERY_2: DUMMY_RESPONSE}
+    if not images:
+        raise ValueError("images must contain at least one receipt")
+
+    inputs = [
+        {
+            "image_url": image_data_url(path)
+        }
+        for path in images
+    ]
+    results = chain.batch(inputs)
+    if len(results) != len(images):
+        raise ValueError(
+            f"chain returned {len(results)} result(s) for {len(images)} receipt(s)"
+        )
+
+    total_spent = Decimal("0.00")
+    total_without_discount = Decimal("0.00")
+
+    for path, result in zip(images, results):
+        text = response_text(result)
+        text = re.sub(
+            r"^\s*```(?:json)?\s*|\s*```\s*$",
+            "",
+            text,
+            flags=re.IGNORECASE,
+        )
+        data = json.loads(text)
+        subtotal = Decimal(str(data["subtotal"]))
+        final_payment = Decimal(str(data["final_payment"]))
+        discount_values = data.get("discounts", [])
+        if not isinstance(discount_values, list):
+            raise ValueError(f"discounts must be a list for receipt {path.name}")
+        discounts = [abs(Decimal(str(value))) for value in discount_values]
+
+        total_spent += final_payment
+        total_without_discount += subtotal + sum(discounts, Decimal("0.00"))
+
+    total_spent = total_spent.quantize(Decimal("0.01"))
+    total_without_discount = total_without_discount.quantize(
+        Decimal("0.01")
+    )
+
+    return {QUERY_1: f"HK${total_spent:.2f}", QUERY_2: f"HK${total_without_discount:.2f}"}
 
 
 # Everything below is provided runner/scoring code. No edits are needed.
